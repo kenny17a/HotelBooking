@@ -1,52 +1,62 @@
+// controllers/clerkWebhooks.js
 import User from "../models/user.js";
 import { Webhook } from "svix";
 
 const clerkWebhooks = async (req, res) => {
 	try {
-		//Create a Svix instance with clerk webhook secret
-		const whook = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
+		const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
-		//Getting headers
+		if (!WEBHOOK_SECRET) {
+			return res.status(500).json({ message: "Webhook secret missing" });
+		}
+
+		const whook = new Webhook(WEBHOOK_SECRET);
+
 		const headers = {
 			"svix-id": req.headers["svix-id"],
 			"svix-timestamp": req.headers["svix-timestamp"],
 			"svix-signature": req.headers["svix-signature"],
 		};
 
-		//Verifying Headers
-		await whook.verify(JSON.stringify(req.body), headers);
+		// ✅ RAW body (required)
+		const payload = req.body.toString("utf8");
 
-		//Getting Data from request body
-		const { data, type } = req.body;
+		// ✅ Verify webhook
+		const event = whook.verify(payload, headers);
+
+		const { data, type } = event;
 
 		const userData = {
 			_id: data.id,
-			email: data.email_address[0].email_address,
-			username: data.first_name + " " + data.last_name,
+			email: data.email_addresses?.[0]?.email_address || "",
+			username: `${data.first_name || ""} ${data.last_name || ""}`.trim(),
 			image: data.image_url,
 		};
 
-		//Switch Cases for different Events
 		switch (type) {
-			case "user.created": {
+			case "user.created":
 				await User.create(userData);
 				break;
-			}
-			case "user.updated": {
-				await User.findByIdAndUpdate(data.id, userData);
+
+			case "user.updated":
+				await User.findByIdAndUpdate(data.id, userData, {
+					new: true,
+					upsert: true,
+				});
 				break;
-			}
-			case "user.deleted": {
+
+			case "user.deleted":
 				await User.findByIdAndDelete(data.id);
 				break;
-			}
+
 			default:
-				break;
+				console.log("Unhandled Clerk event:", type);
 		}
-		res.json({ success: true, message: "Webhook Received" });
+
+		res.status(200).json({ success: true });
 	} catch (error) {
-		console.log(error.message);
-		res.json({ success: false, message: error.message });
+		console.error("Clerk webhook error:", error);
+		res.status(400).json({ success: false, message: error.message });
 	}
 };
 
