@@ -1,11 +1,9 @@
-// controllers/clerkWebhooks.js
 import User from "../models/user.js";
 import { Webhook } from "svix";
 
 const clerkWebhooks = async (req, res) => {
 	try {
 		const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
-
 		if (!WEBHOOK_SECRET) {
 			return res.status(500).json({ message: "Webhook secret missing" });
 		}
@@ -18,45 +16,35 @@ const clerkWebhooks = async (req, res) => {
 			"svix-signature": req.headers["svix-signature"],
 		};
 
-		// ✅ RAW body (required)
-		const payload = req.body.toString("utf8");
-
-		// ✅ Verify webhook
+		const payload = req.body; // raw buffer
 		const event = whook.verify(payload, headers);
 
 		const { data, type } = event;
 
 		const userData = {
-			_id: data.id,
+			clerkId: data.id,
 			email: data.email_addresses?.[0]?.email_address || "",
 			username: `${data.first_name || ""} ${data.last_name || ""}`.trim(),
 			image: data.image_url,
 		};
 
-		switch (type) {
-			case "user.created":
-				await User.create(userData);
-				break;
+		if (type === "user.created" || type === "user.updated") {
+			await User.findOneAndUpdate({ clerkId: data.id }, userData, {
+				upsert: true,
+				new: true,
+			});
+			console.log("✅ User saved/updated");
+		}
 
-			case "user.updated":
-				await User.findByIdAndUpdate(data.id, userData, {
-					new: true,
-					upsert: true,
-				});
-				break;
-
-			case "user.deleted":
-				await User.findByIdAndDelete(data.id);
-				break;
-
-			default:
-				console.log("Unhandled Clerk event:", type);
+		if (type === "user.deleted") {
+			await User.findOneAndDelete({ clerkId: data.id });
+			console.log("🗑 User deleted");
 		}
 
 		res.status(200).json({ success: true });
 	} catch (error) {
-		console.error("Clerk webhook error:", error);
-		res.status(400).json({ success: false, message: error.message });
+		console.error("❌ Clerk webhook error:", error.message);
+		res.status(400).json({ success: false });
 	}
 };
 

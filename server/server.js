@@ -10,10 +10,14 @@ const app = express();
 
 app.use(cors());
 
-// 🚨 CLERK WEBHOOK MUST BE FIRST
-app.use("/api/webhooks", webhookRoute);
+// ✅ CLERK WEBHOOK — RAW BODY REQUIRED
+app.use(
+	"/api/webhooks",
+	express.raw({ type: "application/json" }), // 🔥 THIS FIXES IT
+	webhookRoute,
+);
 
-// Clerk auth middleware AFTER webhook
+// Clerk middleware AFTER webhook
 app.use(clerkMiddleware());
 
 // Normal JSON parsing AFTER webhook
@@ -24,5 +28,4 @@ app.get("/", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
